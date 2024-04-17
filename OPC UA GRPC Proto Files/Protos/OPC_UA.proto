@@ -1,0 +1,49 @@
+﻿syntax = "proto3"; 
+option csharp_namespace = "OPC_UA_GRPC_Proto_Files";  //Namespace of the project where this will be compiled 
+
+package OPCUA_GRPC;   
+
+  
+
+service OPCUAGRPC { 
+
+//Send a greeting 
+
+rpc WriteValue (WriteValueData) returns (DiagInfo); 
+
+rpc HealthCheck(DiagInfo) returns(DiagInfo);
+
+rpc ReadValue(ReadVariableData) returns(VariableData);
+} 
+
+  
+message WriteValueData
+{
+	string VariableName =1 ;
+
+	string Value = 2;
+} 
+
+message DiagInfo
+{
+	string Info = 1;
+}
+
+message ReadVariableData
+{
+	string VariableName = 1;
+
+}
+
+
+message VariableData
+{
+	string VariableName = 1;
+
+	string VariableValue = 2;
+	
+	string VariableType = 3;
+}
+
+
+ 
