@@ -41,7 +41,7 @@ namespace OPC_UA_Grpc_Server
         ConfiguredEndpoint configuredEndpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfiguration);// { EndpointUrl = new Uri(@"opc.tcp://192.168.0.1:4840") };
         ApplicationInstance applicationInstance = new ApplicationInstance() { ApplicationName = "VisionTestBench", ApplicationType = ApplicationType.Client };
         ApplicationConfiguration appConfig = new ApplicationConfiguration() { ApplicationName = "VisionTestBench", ApplicationType = ApplicationType.Client, ApplicationUri = @"urn:pablof-5540:OPCFoundation:SampleClient" };
-        appConfig.ClientConfiguration = new ClientConfiguration() { DefaultSessionTimeout = 1000 * 60 * 10, MinSubscriptionLifetime = 10000 };
+        appConfig.ClientConfiguration = new ClientConfiguration() { DefaultSessionTimeout = 1000 * 30, MinSubscriptionLifetime = 0 };
         appConfig.SecurityConfiguration = new SecurityConfiguration() { AutoAcceptUntrustedCertificates = true, UseValidatedCertificates = false };
         ServiceMessageContext serviceMessageContext = appConfig.CreateMessageContext(true);
 
@@ -440,7 +440,11 @@ namespace OPC_UA_Grpc_Server
             string name = Name + "." + resd.BrowseName.Name;
             if (resd.NodeClass == NodeClass.Variable)
             {
-              NamesAndReferenceDescriptions.Add(name, resd);
+
+              if (!NamesAndReferenceDescriptions.ContainsKey(name))
+              {
+                NamesAndReferenceDescriptions.Add(name, resd);
+              }
             }
             if (resd.NodeClass == NodeClass.Object || resd.NodeClass == NodeClass.Variable)
             {
