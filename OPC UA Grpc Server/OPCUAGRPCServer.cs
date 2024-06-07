@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Grpc.Core;
 using Opc.Ua.Client;
 using Opc.Ua;
-using OPC_UA_GRPC_Proto_Files;
 using System.Configuration;
 using Opc.Ua.Configuration;
 using static System.Collections.Specialized.BitVector32;
@@ -19,9 +18,7 @@ namespace OPC_UA_Grpc_Server
 {
   public class OPCUAGRPCServer
   {
-    public Server GrpcServer;   //Comunicates to the GRPC client
 
-    public OPCUAServicer OPCUAServicer;   //Implements what each client call does 
 
     Dictionary<string, ReferenceDescription> NamesAndReferenceDescriptions = new Dictionary<string, ReferenceDescription>(); 
     //This is a list of all refrence descriptions of all variable nodes so we can look each rd for reading and writing in the node
@@ -66,32 +63,7 @@ namespace OPC_UA_Grpc_Server
       #endregion
 
     
-      #region Creating GRPC Server
-      //Craeting the server where out GRPC client will read and write values from
-      try
-      {
-        string IpAddress =  ConfigurationManager.AppSettings["GrpcServerIpAddress"];
-        int Port = int.Parse(ConfigurationManager.AppSettings["GrpcServerPort"]);
-        ChannelOption channelOption0 = new ChannelOption(ChannelOptions.MaxReceiveMessageLength, int.MaxValue); //If this need to be copied the order of these does matter
-        ChannelOption channelOption1 = new ChannelOption(ChannelOptions.MaxSendMessageLength, int.MaxValue); //These two options are used to increace the size of messages passed between client and server
-        IEnumerable<ChannelOption> channelOptions = new ChannelOption[] { channelOption0, channelOption1 }; //Will see first if we need to increase the defualt size of image passing for server -> client
-                                                                                                            //Above the order in which the channel options goes is important. Tested and did not work the other way
-        OPCUAServicer = new OPCUAServicer();
-        GrpcServer = new Server(channelOptions)
-        {
-          Services = { OPCUAGRPC.BindService(OPCUAServicer) },
-          Ports = { new ServerPort(IpAddress, Port, ServerCredentials.Insecure) }
-        };//The IP Addres should follow the network scheme of the 
-        SubscribeToGRPCCalls();
-        GrpcServer.Start();
-
-      }
-      catch (Exception ex)
-      {
-        Console.WriteLine(ex.Message);
-      }
-      #endregion
-
+   
     }
 
     private void UASession_KeepAlive(ISession session, KeepAliveEventArgs e)
@@ -102,54 +74,27 @@ namespace OPC_UA_Grpc_Server
       }
     }
 
-    private void SubscribeToGRPCCalls()
-    {
-      if(GrpcServer != null)
-      {
-        OPCUAServicer.WriteValueEvent -= OPCUAServicer_WriteValueEvent;
-        OPCUAServicer.WriteValueEvent += OPCUAServicer_WriteValueEvent;
-        OPCUAServicer.ReadVariableEvent -= OPCUAServicer_ReadVariableEvent;
-        OPCUAServicer.ReadVariableEvent += OPCUAServicer_ReadVariableEvent;
-        OPCUAServicer.HealthCheckEvent +=  OPCUAServicer_HealthCheckEvent;
-      }
-    }
 
-    private void OPCUAServicer_HealthCheckEvent(object sender, DiagInfo e)
-    {
-      if (UASession == null) 
-      {
-        e.Info = "Session to UPC UA Server is null";
-      }
-      else
-      {
-        if(UASession.Connected == false)
-        {
-          e.Info = "OPC UA Session is not connected to the Server ";
-        }
-        else
-        {
-          e.Info = "OPC UA Session is connected to the Server";
-        }
-      }
 
-    }
+   
 
-    private void OPCUAServicer_ReadVariableEvent(object sender, Tuple<ReadVariableData, VariableData> e)
+    private VariableData OPCUA_ReadVariabl(ReadVariableData readVariableData)
     {
       DataValue dataValue = null;
+      VariableData variableData = null;
       try
       {
-        ReferenceDescription rd = GetReferenceDescription(e.Item1.VariableName, NamesAndReferenceDescriptions.Select(x => x.Key).ToList());
+        ReferenceDescription rd = GetReferenceDescription(readVariableData.VariableName, NamesAndReferenceDescriptions.Select(x => x.Key).ToList());
         dataValue = UASession.ReadValue((NodeId)rd.NodeId);
         if(dataValue == null)
         {
-          e.Item2.VariableValue = "null";
-          e.Item2.VariableType = "unknown";
+          variableData.VariableValue = "null";
+          variableData.VariableType = "unknown";
         }
         else
         {
-          e.Item2.VariableValue = dataValue.Value.ToString();
-          e.Item2.VariableType = dataValue.Value.GetType().Name;
+          variableData.VariableValue = dataValue.Value.ToString();
+          variableData.VariableType = dataValue.Value.GetType().Name;
         }
         
       }
@@ -159,10 +104,9 @@ namespace OPC_UA_Grpc_Server
         Console.WriteLine(fullExMessage);
         UASession.Reconnect();
         GrabAllNodes(UASession);
-        e.Item2.VariableType = ExceptionToString(ex);
       }
 
-    
+      return variableData;
   }
 
     private ReferenceDescription GetReferenceDescription(string VariableName, List<string> KeyNames)
@@ -199,14 +143,14 @@ namespace OPC_UA_Grpc_Server
       return null;
     }
 
-    private void OPCUAServicer_WriteValueEvent(object sender, Tuple<WriteValueData, OPC_UA_GRPC_Proto_Files.DiagInfo> e)
+    private bool OPCUA_WriteValue(WriteValueData writeValue)
     {
       Exception exception = null;
-
+      bool success = false;
       Node node = null;
       try
       {
-        ReferenceDescription rd = GetReferenceDescription(e.Item1.VariableName, NamesAndReferenceDescriptions.Select(x => x.Key).ToList());
+        ReferenceDescription rd = GetReferenceDescription(writeValue.VariableName, NamesAndReferenceDescriptions.Select(x => x.Key).ToList()); //should be changed to look at the OPCUA server every time not dict created at the begning. Both read and wrtie
         node = UASession.ReadNode((NodeId)rd.NodeId);
         Type node_Type = node.GetType();
         Type nodeDataType = null;
@@ -215,20 +159,20 @@ namespace OPC_UA_Grpc_Server
         {
           VariableNode variableNode = (VariableNode)node;
           nodeDataType = GetNodeDataType(variableNode.DataType.Identifier.ToString());
-          nodeWritevalue = ConvertValueToNodeDataType(e.Item1.Value, nodeDataType);
+          nodeWritevalue = ConvertValueToNodeDataType(writeValue.Value, nodeDataType);
         }
-        //object nodeValueToWrite = 
-        // Type node_DataType = GetTypeByUint(node)
 
         if (nodeDataType == null)
         {
-          e.Item2.Info = @"NodeId was not able to be mapped to a Data Type";
+          // @"NodeId was not able to be mapped to a Data Type";
+          success = false;
         }
         else
         {
           if (nodeWritevalue == null)
           {
-            e.Item2.Info = @"Value pass in was not able to be converted to the Node Data Type  Data Type :  " + nodeDataType.Name + " | Value : " + e.Item1.Value;
+            // @"Value pass in was not able to be converted to the Node Data Type  Data Type :  " + nodeDataType.Name + " | Value : " + e.Item1.Value;
+            success = false;
           }
           else
           { 
@@ -237,7 +181,8 @@ namespace OPC_UA_Grpc_Server
             WriteValueCollection writeValues = new WriteValueCollection();
             writeValues.Add(new WriteValue() { NodeId = (NodeId)rd.NodeId, Value = new DataValue() { Value = nodeWritevalue }, AttributeId = Attributes.Value });
             UASession.Write(null, writeValues, out statusCodes, out diagnosticInfos);
-            e.Item2.Info = @"Success";
+            // @"Success";
+            success = true;
           }
         }
       }
@@ -249,7 +194,7 @@ namespace OPC_UA_Grpc_Server
         GrabAllNodes(UASession);
         Console.WriteLine((fullExMessage));
       }
-
+      return success;
     }
 
     #region Usefull Mehtods 
@@ -373,6 +318,7 @@ namespace OPC_UA_Grpc_Server
     #endregion
 
     #region Getting All Variable Nodes
+    //this can be cahnge to grab a node by passing node name / plc db name and the sesion to find and write values dynamically 
     public void GrabAllNodes(Session session)
     {
       ILocalNode root = UASession.NodeCache.Find(Objects.RootFolder) as ILocalNode;
